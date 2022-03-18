@@ -1,0 +1,513 @@
+---
+title: "606 final project"
+output: html_document
+---
+Link to dataset :https://www.kaggle.com/anmolkumar/health-insurance-cross-sell-prediction
+
+```{r}
+library(truncnorm)
+library(ggplot2)
+library(ISLR)
+library(MASS)
+library(mlbench)
+library(sampling)
+library(car)
+library(klaR)
+library(DAAG)
+library(caret)
+library(tree)
+```
+```{r}
+rdata = read.csv('train.csv')
+```
+```{r}
+head(rdata,5)
+```
+
+First check the basic information about this dataset:
+```{r}
+dim(rdata)
+```
+```{r}
+unique(rdata$Driving_License)
+```
+```{r}
+unique(rdata$Region_Code)
+```
+```{r}
+unique(rdata$Previously_Insured)
+```
+```{r}
+unique(rdata$Vehicle_Age)
+```
+```{r}
+unique(rdata$Vehicle_Damage)
+```
+```{r}
+unique(rdata$Policy_Sales_Channel)
+```
+*data cleaning*
+
+since the ID column is only for identification, so I will drop ID column for the rest of the analysis:
+```{r}
+ndata = rdata[,-1]
+head(ndata,4)
+```
+```{r}
+ndata = na.omit(ndata,)
+dim(ndata)[1]
+```
+```{r}
+ndata$Response[ndata$Response==1] <-'Yes'
+ndata$Response[ndata$Response==0] <-'No'
+```
+```{r}
+ndata[] = lapply(ndata,function(x) if (is.character(x)) as.factor(x) else x)
+head(ndata,4)
+```
+```{r}
+contrasts(ndata$Response)
+```
+
+```{r}
+logistic_fit = glm(Response~.,family=binomial,data=ndata)
+summary(logistic_fit)$coeff
+```
+```{r}
+summary(ndata$Response)
+```
+```{r}
+set.seed(10)
+N=381109
+n=N/2
+idx = sample(1:N,size=n,replace=FALSE)
+```
+```{r}
+sns_train_data = ndata[idx,]
+sns_test_data = ndata[-idx,]
+
+head(sns_train_data,4)
+```
+```{r}
+#pairs(sns_train_data)
+```
+
+```{r}
+lg_regression = glm(Response~.,family=binomial,data=sns_train_data)
+lg_predict = predict(lg_regression,sns_test_data,type='response')
+proPredict=rep('No',dim(sns_test_data)[1])
+proPredict[lg_predict>=0.5]="Yes"
+table(proPredict,sns_test_data$Response)
+```
+```{r}
+confusion(proPredict,sns_test_data$Response)
+```
+```{r}
+plot(lg_regression)
+```
+Lets do the vif test before:
+```{r}
+vif(lg_regression)
+```
+no value is coordinate with others.
+
+
+```{r}
+for (i in seq(from=0,to=1,by=0.1) ){
+  lg_regression = glm(Response~.,family=binomial,data=sns_train_data)
+  lg_predict = predict(lg_regression,sns_test_data,type='response')
+  proPredict=rep('No',dim(sns_test_data)[1])
+  proPredict[lg_predict>=i]="Yes"
+  confusion(proPredict,sns_test_data$Response)
+}
+
+```
+From above we can say when we set pro>0.5 we will get the max accuracy = 0.877
+```{r}
+summary(lg_regression)
+```
+Based on the result, lets try to drop Region_Code and Vintage see if we can get better fitting.
+
+```{r}
+lg_regression2 = glm(factor(Response)~Gender+Age+
+                 Driving_License+Previously_Insured+
+                 Vehicle_Age+Vehicle_Damage+Annual_Premium+Policy_Sales_Channel
+                 ,data=sns_train_data,family='binomial')
+```
+```{r}
+lg_predict2 = predict(lg_regression2,sns_test_data,type='response')
+proPredict2=rep('No',dim(sns_test_data)[1])
+proPredict2[lg_predict2>=0.5]="Yes"
+table(proPredict2,sns_test_data$Response)
+```
+```{r}
+confusion(proPredict2,sns_test_data$Response)
+```
+the results seems about the same
+
+we also can use different sample method...
+
+Now, lets try another model:
+
+*Linear discriminant analysis*
+simple random sample:
+```{r}
+lda.fit = lda(Response~.,data=sns_train_data)
+lda.pre = predict(lda.fit,sns_test_data)
+plot(lda.fit)
+```
+```{r}
+table(lda.pre$class,sns_test_data$Response)
+```
+```{r}
+confusion(lda.pre$class,sns_test_data$Response)
+```
+Now lets view the partition results:
+```{r}
+head(sns_train_data)
+```
+```{r}
+#partimat(Response~Annual_Premium+Vintage,data=sns_train_data,method='lda')
+```
+
+
+
+
+Try QDA:
+```{r}
+qda.fit = qda(factor(Response)~.,data=sns_train_data)
+qda.fit
+```
+```{r}
+qda.class=predict(qda.fit,sns_test_data)$class
+table(qda.class,sns_test_data$Response)
+```
+```{r}
+confusion(qda.class,sns_test_data$Response)
+```
+
+
+**Resampling Cross Validation**
+LOOCV
+it takes to long for whould data to process, so I use sns to test first.
+```{r}
+set.seed(10)
+idx1 = sample(1:dim(ndata)[1],1000,replace=FALSE)
+l = ndata[idx1,]
+loocv.fit = train(factor(Response)~.,data=l,trControl= trainControl(method='LOOCV'),method='glm',family='binomial')
+loocv.fit
+```
+```{r}
+loocv.fit2 = train(factor(Response)~.,data=l,trControl=trainControl(method='LOOCV'),method='lda')
+```
+```{r}
+loocv.fit2
+```
+k-fold:
+lda
+```{r}
+cv.fit = train(factor(Response)~.,data=l,trControl=trainControl(method='cv',number=10),method='lda')
+```
+```{r}
+cv.fit$results[2]
+```
+lg:
+```{r}
+summary(lg_regression)
+```
+drop region_code and vintage
+```{r}
+cv.fit = train(factor(Response)~Gender+Age+
+                 Driving_License+Previously_Insured+
+                 Vehicle_Age+Vehicle_Damage+Annual_Premium+Policy_Sales_Channel
+                 ,data=l,trControl=trainControl(method='cv',number=10),method='glm',family='binomial')
+```
+```{r}
+cv.fit2 = train(factor(Response)~.
+                 ,data=l,trControl=trainControl(method='cv',number=10),method='glm',family='binomial')
+```
+
+```{r}
+cv.fit$results[2]
+cv.fit2$results[2]
+```
+
+**Tree based classification**
+
+```{r}
+set.seed(10)
+sns_test_data$Annual_Premium=log(sns_test_data$Annual_Premium)
+sns_train_data$Annual_Premium=log(sns_train_data$Annual_Premium)
+
+tree.response = tree(factor(Response)~., sns_train_data)
+summary(tree.response)
+```
+```{r}
+plot(tree.response)
+text(tree.response,pretty=0)
+```
+
+
+
+
+
+Age+driver_licence + Response
+
+
+
+
+```{r}
+tree.pred = predict(tree.response,sns_test_data,type='class')
+table(tree.pred,sns_test_data$Response)
+```
+filter(rdata, Previously_Insured ==0)
+
+
+
+
+
+
+```{r}
+table1 <- table(rdata$Vehicle_Damage, rdata$Response)
+table1
+
+```
+$$
+\text{H}_0:\quad \text{There is no difference between "Vehicle_Damage" and "No Previously_Insured".}
+$$
+
+$$
+\text{H}_a:\quad \text{There is difference between "Previously_Insured" and "No Previously_Insured".}
+$$
+
+
+
+**Risk Difference**
+
+```{r}
+library(fmsb)
+riskdifference<-riskdifference(187714 ,146685 ,188696,192413, conf.level = 0.95)
+riskdifference
+```
+Ans: The P-value is less than 0.05, and the 95% confidence interval does not cover 0, there is 95% confidence we can reject H0, so there is difference between "Previously_Insured" and "No Previously_Insured".
+
+
+**Risk Ratio**
+
+```{r}
+riskratio<-riskratio(187714 ,146685 ,188696,192413, conf.level = 0.95, p.calc.by.independence = TRUE)
+riskratio
+```
+Ans: The P-value is less than 0.05, and the 95% confidence interval does not cover 1, there is 95% confidence we can reject H0, so there is difference between "Previously_Insured" and "No Previously_Insured".
+
+
+**Odds Ratio**
+
+```{r}
+oddsratio<-oddsratio(187714 ,146685 ,982,45728, conf.level = 0.95, p.calc.by.independence = TRUE)
+oddsratio
+```
+Ans: The P-value is less than 0.05, and the 95% confidence interval does not cover 1, there is 95% confidence we can reject H0, so there is difference between "Previously_Insured" and "No Previously_Insured".
+
+All reject H0. 
+
+
+
+Add Gender
+
+$$
+\text{H}_0:\quad \text{There is independence between "Previously_Insured" and "Response".}
+$$
+$$
+\text{H}_0:\quad \text{There is no independence between "Previously_Insured" and "Response".}
+$$
+```{r}
+table1 <- table(rdata$Vehicle_Damage,rdata$Response)
+ftable(table1)
+
+```
+```{r}
+ oddsratio( 187714 ,146685 ,982,45728, conf.level=0.95, p.calc.by.independence=TRUE) 
+```
+
+
+
+
+```{r}
+table2 <- table(rdata$Gender,rdata$Vehicle_Damage,rdata$Response)
+ftable(table2)
+
+```
+For female: 
+
+```{r}
+ oddsratio(94937,61898 , 418, 17767, conf.level=0.95, p.calc.by.independence=TRUE) 
+```
+Ans: For female, The P-value is less than 0.05, and the 95% confidence interval does not cover 1, there is 95% confidence we can reject H0, so there is no exists conditional independence between the variables "Previously_Insured" and "Response"
+
+
+
+For male: 
+```{r}
+ oddsratio(92777,84787 , 564, 2796, conf.level=0.95, p.calc.by.independence=TRUE) 
+```
+Ans: For male, The P-value is less than 0.05, and the 95% confidence interval does not cover 1, there is 95% confidence we can reject H0, so there is no exists conditional independence between the variables "Previously_Insured" and "Response"
+
+$$
+\text{Age_level}=\left\{
+\begin{aligned}
+&1,\quad \text{if}\ 20\le\text{Age}\le 29, \\
+&2,\quad \text{if}\ 30\le\text{Age}\le 49, \\
+&3,\quad \text{if}\ 50\le\text{Age}\le 85, \\
+\end{aligned}
+\right.
+$$ 
+Only keep no unsured. 
+
+```{r}
+newDATA<-rdata[rdata$Previously_Insured ==0,]
+newDATA
+```
+```{r}
+# We order the dataset as per the age
+DATA<-newDATA[order(newDATA$Age),]
+# We group the patients as per their ages (20-39, 40-59, 60-85)
+l1=sum(as.numeric(DATA$Age<=29))
+l2=sum(as.numeric(DATA$Age<=49))-l1
+l3=dim(DATA)[1]-l1-l2
+Age_level<-c(rep('1', l1), rep('2', l2), rep('3', l3))
+newDATA1<-cbind(DATA, Age_level)
+head(newDATA1,10)
+```
+
+Age and response 
+
+$$
+\text{H}_0:\quad \text{There is  independence between "Age_level" and "Response ".}
+$$
+$$
+\text{H}_a:\quad \text{There is  no independence between "Age_level" and "Response".}
+$$
+```{r}
+table5<-table(newDATA1$Age_level, newDATA1$Response )
+table5
+
+chisq.test(table5)
+```
+Ans: The p-value is 2.2e-16<0.05, so we can reject the null hypothesis, there is difference between "Age_level" and "Response".
+
+
+
+```{r}
+cond_data1<-table(newDATA1$Age_level,newDATA1$Vehicle_Damage, newDATA1$Response )
+ftable(cond_data1)
+```
+
+For Age 20~29
+
+```{r}
+subtable20<-newDATA1[newDATA1$Age_level==1,]
+subtable20
+```
+```{r}
+table20<-table(subtable20$Vehicle_Damage,subtable20$Response )
+table20
+
+chisq.test(table20)
+```
+
+For Age 30~49
+
+```{r}
+subtable30<-newDATA1[newDATA1$Age_level==2,]
+subtable30
+```
+
+```{r}
+table30<-table(subtable30$Vehicle_Damage, subtable30$Response )
+table30
+
+chisq.test(table30)
+```
+
+For Age 50+
+```{r}
+subtable50<-newDATA1[newDATA1$Age_level==3,]
+subtable50
+```
+```{r}
+table50<-table(subtable50$Vehicle_Damage, subtable50$Response )
+table50
+
+chisq.test(table50)
+```
+
+ALL reject the H0 
+
+
+
+
+
+
+logit model to the dataset with "Age_level" and "Vehicle_Damage" as the predictors and "Response" as the response variable.
+```{r}
+library(VGAM)
+fit.clogit=vglm(Response~Age_level, family=cumulative(parallel = TRUE), data=newDATA1)
+fit.clogit
+```
+
+```{r}
+coef(fit.clogit)
+```
+
+Check the goodness-of-fit
+
+```{r}
+1-pchisq(deviance(fit.clogit),df.residual(fit.clogit))
+```
+
+
+
+Apply the fitted model to the whole dataset and calculate the accuracy rate of prediction.
+
+```{r}
+library(Rfast)
+```
+
+```{r}
+prob.fit<-fitted(fit.clogit)
+fitted.result<-colnames(prob.fit)[rowMaxs(prob.fit)]
+misClasificError <- mean(fitted.result != newDATA1$Response)
+print(paste('Accuracy',1-misClasificError))
+
+```
+```{r}
+subtable50<-newDATA1[newDATA1$Age_level==3,]
+subtable50
+```
+
+
++ vehicle damage
+
+```{r}
+library(VGAM)
+fit.clogit1=vglm(Response~Age_level+Vehicle_Damage+, family=cumulative(parallel = TRUE), data=newDATA1)
+fit.clogit1
+```
+```{r}
+coef(fit.clogit1)
+```
+Check the goodness-of-fit
+
+```{r}
+1-pchisq(deviance(fit.clogit1),df.residual(fit.clogit1))
+```
+
+```{r}
+prob.fit1<-fitted(fit.clogit1)
+fitted.result1<-colnames(prob.fit1)[rowMaxs(prob.fit1)]
+misClasificError1 <- mean(fitted.result1 != newDATA1$Response)
+print(paste('Accuracy',1-misClasificError1))
+
+```
+
